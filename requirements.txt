@@ -1,0 +1,4 @@
+# Guarda este contenido en un archivo llamado requirements.txt
+
+python-telegram-bot
+requests
