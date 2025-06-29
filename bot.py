@@ -1,7 +1,10 @@
+# Guarda este código en un archivo llamado bot.py
+
 import logging
 import requests
 import datetime
 import os
+import asyncio
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -10,7 +13,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 NOTION_TOKEN = os.environ.get('NOTION_TOKEN')
 NOTION_DATABASE_ID = os.environ.get('NOTION_DATABASE_ID')
-WEBHOOK_URL = os.environ.get('RENDER_EXTERNAL_URL') # Esta variable la da Render automáticamente
+WEBHOOK_URL = os.environ.get('RENDER_EXTERNAL_URL')
 
 if not all([TELEGRAM_BOT_TOKEN, NOTION_TOKEN, NOTION_DATABASE_ID]):
     raise ValueError("Error: Faltan variables de entorno críticas.")
@@ -80,30 +83,35 @@ async def handle_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     pending_users.remove(user_id)
 
-# --- Configuración del Servidor Web (Flask) y Webhook ---
-# ESTA ES LA LÍNEA QUE GUNICORN BUSCA Y NO ENCONTRABA
-app = Flask(__name__) 
-# --------------------------------------------------------
-
+# --- CONFIGURACIÓN DE LA APP DE TELEGRAM ---
 ptb_app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 ptb_app.add_handler(CommandHandler("start", start))
 ptb_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_name))
 
-@app.route("/", methods=["POST"])
-async def webhook():
-    update = Update.de_json(request.get_json(force=True), ptb_app.bot)
-    await ptb_app.process_update(update)
-    return "ok"
+# --- CÓDIGO DEL SERVIDOR WEB (FLASK) - VERSIÓN CORREGIDA ---
+app = Flask(__name__)
 
+# Esta es la función que procesará las actualizaciones de Telegram de forma asíncrona
+async def process_update(update_json):
+    update = Update.de_json(update_json, ptb_app.bot)
+    await ptb_app.process_update(update)
+
+@app.route("/", methods=["POST"])
+def webhook():
+    """Esta es una función SÍNCRONA que recibe la llamada de Telegram."""
+    # Ejecuta la función asíncrona de forma segura y espera a que termine.
+    asyncio.run(process_update(request.get_json(force=True)))
+    return "ok", 200
+
+# Esta función se ejecuta solo una vez al arrancar para decirle a Telegram dónde está nuestro bot.
 async def setup():
     if not WEBHOOK_URL:
         logger.warning("RENDER_EXTERNAL_URL no encontrada, saltando configuración de webhook.")
         return
+    # Esperamos un poco para que el servidor esté listo
+    await asyncio.sleep(1)
     await ptb_app.bot.set_webhook(url=f"{WEBHOOK_URL}")
     logger.info(f"✅ Webhook configurado en: {WEBHOOK_URL}")
 
-# Se crea un loop de eventos para correr la función asíncrona de setup
-import asyncio
-# Solo se ejecuta una vez al inicio del programa
-if __name__ != "__main__":
-    asyncio.run(setup())
+# Esto se ejecuta cuando gunicorn importa el archivo
+asyncio.run(setup())
