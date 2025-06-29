@@ -1,3 +1,5 @@
+# Contenido para requirements.txt
+
 python-telegram-bot
 requests
 flask[async]
